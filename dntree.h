@@ -57,6 +57,7 @@ typedef struct subDN {
 
 int dnid_init(mdb_ctx *mdb_ctx);
 int dntree_get_id4dn(MDB_cursor *cursor, char *dn, DNID *dnid, bool create);
+int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn);
 int dntree_del_id(MDB_cursor *cursor, DNID dnid);
 int dntree_del_ldapdn(MDB_cursor *cursor, LDAPDN dn);
 

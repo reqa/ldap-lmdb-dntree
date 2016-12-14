@@ -35,6 +35,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <malloc.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include "dntree.h"
@@ -239,6 +240,14 @@ int main(int argc, char *argv[]) {
 			mdb_txn_abort(mdb_ctx.txn);
 			return rv;
 		}
+
+		rv = dntree_lookup_dn4id(mdb_ctx.cur, dnid, &tmpdn);
+		if (rv != MDB_SUCCESS) {
+			mdb_txn_abort(mdb_ctx.txn);
+			return rv;
+		}
+		printf("DN: %s\n", tmpdn);
+		free(tmpdn);
 
 		rv = dnid_txn_commit(&mdb_ctx);
 		if (rv != MDB_SUCCESS) {

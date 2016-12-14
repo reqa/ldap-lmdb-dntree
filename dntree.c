@@ -46,6 +46,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <assert.h>
 #include "dntree.h"
 
 int mdb_dupsort(const MDB_val *a, const MDB_val *b)
@@ -57,7 +58,14 @@ int mdb_dupsort(const MDB_val *a, const MDB_val *b)
 	sdn_b = (subDN *)b->mv_data;
 
 	diff = sdn_a->type - sdn_b->type;
-	return diff ? diff : strcmp(&sdn_a->data, &sdn_b->data);
+	if (diff) {
+		return diff;
+	}
+	if (sdn_a->type == SUBDN_TYPE_LINK) {
+		return strcmp(&sdn_a->data, &sdn_b->data);
+	} else {
+		return 0;
+	}
 }
 
 unsigned int num_rdns(LDAPDN dn) {
@@ -136,6 +144,45 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 	return rv;
 }
 
+int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
+{
+	int		rv;
+	MDB_val		key, data;
+	subDN		*subdn;
+	DNID		id = dnid;
+
+	key.mv_size = sizeof(DNID);
+	key.mv_data = &id;
+
+	data.mv_size = sizeof(subDN);
+	subdn = malloc(data.mv_size);
+	if (subdn == NULL) {
+		dntree_log(0, "%s: Malloc failed", __func__);
+		abort();
+	}
+	subdn->type = SUBDN_TYPE_NODE;
+	data.mv_data = subdn;
+
+	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_BOTH);
+	free(subdn);
+
+	// Workaround for (ITS#8393) LMDB - MDB_GET_BOTH broken on non-dup value
+	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_CURRENT);
+
+	if (rv != MDB_SUCCESS) {
+		dntree_log(0, "%s: mdb_cursor_get: %s (%d)",
+		           __func__, mdb_strerror(rv), rv);
+		return rv;
+	};
+
+	subdn = (subDN *) data.mv_data;
+
+	*dn = malloc(strlen(&subdn->data));
+	strcpy(*dn, &subdn->data);
+
+	return rv;
+}
+
 static int next_free_dnid(MDB_cursor *cur, DNID *dnid_out)
 {
 	int		rv;
@@ -161,12 +208,21 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	MDB_val		key, data;
 	DNID		id;
 	char		*rdn_str;
+	char		*dn_str;
+	size_t		dn_len;
 	size_t		rdn_len;
 	subDN		*subdn;
 
 	key.mv_size = sizeof(DNID);
 	key.mv_data = &id;
 	id = parent;
+
+	rv = ldap_dn2str(dn, &dn_str, LDAP_DN_FORMAT_LDAPV3);
+	if (rv != LDAP_SUCCESS) {
+		dntree_log(0, "%s: ldap_dn2str failed: %s (%d)",
+		           __func__, ldap_err2string(rv), rv);
+		return rv;
+	}
 
 	rv = ldap_rdn2str(dn[0], &rdn_str, LDAP_DN_FORMAT_LDAPV3);
 	if (rv != LDAP_SUCCESS) {
@@ -178,9 +234,11 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	dntree_log(2, "%s: child=%lu, parent=%lu: \"%s\"",
 	           __func__, child, parent, rdn_str);
 
+	dn_len = strlen(dn_str);
+	subdn = malloc(sizeof(subDN) + dn_len);
 	rdn_len = strlen(rdn_str);
+	assert(dn_len >= rdn_len);
 	data.mv_size = sizeof(subDN) + rdn_len;
-	subdn = malloc(data.mv_size);
 	if (subdn == NULL) {
 		dntree_log(0, "%s: Malloc failed", __func__);
 		abort();
@@ -197,8 +255,11 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	// Store subdn node
 	if (rv == MDB_SUCCESS) {
 		id = child;
+
+		data.mv_size = sizeof(subDN) + dn_len;
 		subdn->type = SUBDN_TYPE_NODE;
 		subdn->id = parent;	// backlink
+		strcpy(&subdn->data, dn_str);
 
 		rv = mdb_cursor_put(write_cursor_p, &key, &data, MDB_NODUPDATA);
 		if (rv != MDB_SUCCESS) {
@@ -206,6 +267,7 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 			           __func__, child, mdb_strerror(rv), rv);
 		}
 	}
+	ldap_memfree(dn_str);
 	free(subdn);
 
 	return rv;
