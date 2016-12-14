@@ -15,7 +15,7 @@ and vice versa.
 
 ## API Reference
 
-The API, as defined by `dntree.h` is bound to change.
+The API, as defined by `dntree.h` is bound to change as this experiment continues.
 
 ## Tests
 
@@ -26,7 +26,7 @@ make
 
 ## Contributors
 
-Currently this code is maintained by the author.
+Currently this code is maintained by the author, feedback is welcome.
 
 ## License
 
