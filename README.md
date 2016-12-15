@@ -9,9 +9,7 @@ An example showing how dntree can be used is given in `dntree-example1.c`.
 ## Motivation
 
 I was curious to learn how to use lmdb. At univention we use the back-mdb backend, which is very reliable and performant.
-So lmdb seems like a good choice for LDAP DN related stuff. But lmdb limits key size to 511 bytes by default. So, to
-use lmdb in some contexts dealing with LDAP DNs (or file paths for that matter) it is useful to map DN values to ID keys
-and vice versa.
+So lmdb seems like a good choice for LDAP DN related stuff. But lmdb limits key size to [511 bytes](https://bugzilla.redhat.com/show_bug.cgi?id=1086784#c5) by default. So, to use lmdb in some contexts dealing with LDAP DNs (or file paths for that matter) it is useful to map DN values to ID keys and vice versa.
 
 ## API Reference
 
@@ -23,6 +21,8 @@ The API, as defined by `dntree.h` is bound to change as this experiment continue
 make
 ./dntree-example1 -d 3
 ```
+
+`libldap` and `liblmdb` need to be installed for this.
 
 ## Contributors
 
