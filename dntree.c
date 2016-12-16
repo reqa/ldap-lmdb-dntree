@@ -164,6 +164,14 @@ int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
 	data.mv_data = subdn;
 
 	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_BOTH);
+	/*
+	 * or simply use this instead of MDB_GET_BOTH + MDB_GET_CURRENT:
+	MDB_txn		*txn;
+	MDB_dbi		dbi;
+	txn = mdb_cursor_txn(cur);
+	dbi = mdb_cursor_dbi(cur);
+	rv = mdb_get(txn, dbi, &key, &data);
+	*/
 	free(subdn);
 
 	// Workaround for (ITS#8393) LMDB - MDB_GET_BOTH broken on non-dup value
@@ -302,7 +310,7 @@ int dntree_del_id(MDB_cursor *write_cursor_p, DNID dnid)
 	MDB_txn		*txn;
 	MDB_dbi		dbi;
 
-	txn = mdb_cursor_txn (write_cursor_p);
+	txn = mdb_cursor_txn(write_cursor_p);
 	dbi = mdb_cursor_dbi(write_cursor_p);
 	rv = mdb_cursor_open(txn, dbi, &local_read_cursor_p);
 	if (rv != MDB_SUCCESS) {
