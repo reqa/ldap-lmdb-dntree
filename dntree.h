@@ -52,7 +52,7 @@ typedef unsigned long DNID;
 typedef struct subDN {
 	DNID id;
 	SUBDNTYPE type;
-	char data;
+	char data[1];
 } subDN;
 
 int dnid_init(mdb_ctx *mdb_ctx);

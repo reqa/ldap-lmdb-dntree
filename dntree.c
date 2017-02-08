@@ -62,7 +62,7 @@ int mdb_dupsort(const MDB_val *a, const MDB_val *b)
 		return diff;
 	}
 	if (sdn_a->type == SUBDN_TYPE_LINK) {
-		return strcmp(&sdn_a->data, &sdn_b->data);
+		return strcmp(sdn_a->data, sdn_b->data);
 	} else {
 		return 0;
 	}
@@ -107,7 +107,7 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 			abort();
 		}
 		subdn->type = SUBDN_TYPE_LINK;
-		strcpy(&subdn->data, rdn);
+		strcpy(subdn->data, rdn);
 		ldap_memfree(rdn);
 		data.mv_data = subdn;
 
@@ -185,8 +185,8 @@ int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
 
 	subdn = (subDN *) data.mv_data;
 
-	*dn = malloc(strlen(&subdn->data));
-	strcpy(*dn, &subdn->data);
+	*dn = malloc(strlen(subdn->data));
+	strcpy(*dn, subdn->data);
 
 	return rv;
 }
@@ -253,7 +253,7 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	}
 	subdn->type = SUBDN_TYPE_LINK;
 	subdn->id = child;
-	strcpy(&subdn->data, rdn_str);
+	strcpy(subdn->data, rdn_str);
 	ldap_memfree(rdn_str);
 	data.mv_data = subdn;
 
@@ -267,7 +267,7 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 		data.mv_size = sizeof(subDN) + dn_len;
 		subdn->type = SUBDN_TYPE_NODE;
 		subdn->id = parent;	// backlink
-		strcpy(&subdn->data, dn_str);
+		strcpy(subdn->data, dn_str);
 
 		rv = mdb_cursor_put(write_cursor_p, &key, &data, MDB_NODUPDATA);
 		if (rv != MDB_SUCCESS) {
@@ -487,7 +487,7 @@ int dnid_init(mdb_ctx *mdb_ctx)
 	key.mv_size = sizeof(DNID);
 	key.mv_data = &(DNID) {0};
 	data.mv_size = sizeof(subDN);
-	data.mv_data = &(subDN) {0, SUBDN_TYPE_NODE, 0};
+	data.mv_data = &(subDN) {0, SUBDN_TYPE_NODE, ""};
 	// ignore exists
 	mdb_cursor_put(mdb_ctx->cur, &key, &data, MDB_NODUPDATA);
 	// not strictly required, mdb_txn_commit does it for write txn
