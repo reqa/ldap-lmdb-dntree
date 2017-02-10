@@ -93,7 +93,7 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 		rv = ldap_rdn2str(dn[iRDN], &rdn, LDAP_DN_FORMAT_LDAPV3);
 		if (rv != LDAP_SUCCESS) {
 			dntree_log(0, "%s: ldap_rdn2str failed: %s (%d)",
-			           __func__, ldap_err2string(rv), rv);
+				__func__, ldap_err2string(rv), rv);
 			return rv;
 		}
 
@@ -104,6 +104,7 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 		subdn = malloc(data.mv_size);
 		if (subdn == NULL) {
 			dntree_log(0, "%s: Malloc failed", __func__);
+			ldap_memfree(rdn);
 			abort();
 		}
 		subdn->type = SUBDN_TYPE_LINK;
@@ -119,7 +120,7 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 		}
 		if (rv != MDB_SUCCESS) {
 			dntree_log(0, "%s: mdb_cursor_get failed: %s (%d)",
-			           __func__, ldap_err2string(rv), rv);
+				__func__, ldap_err2string(rv), rv);
 			return rv;
 		};
 
@@ -130,10 +131,10 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 
 	if (rv == MDB_SUCCESS) {
 		dntree_log(2, "%s: found id=%lu",
-		           __func__, id);
+			__func__, id);
 	} else if (rv != MDB_NOTFOUND) {
 		dntree_log(0, "%s: failed: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+			__func__, mdb_strerror(rv), rv);
 	}
 
 	*dnid_out = id; 
@@ -164,29 +165,46 @@ int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
 	data.mv_data = subdn;
 
 	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_BOTH);
+	free(subdn);
+	data.mv_data = NULL;
+	data.mv_size = 0;
+
+	if (rv != MDB_SUCCESS) {
+		dntree_log(0, "%s: mdb_cursor_get (MDB_GET_BOTH): %s (%d)",
+			__func__, mdb_strerror(rv), rv);
+		return rv;
+	};
+
+	// Workaround for (ITS#8393) LMDB - MDB_GET_BOTH broken on non-dup value
+	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_CURRENT);
+	if (rv != MDB_SUCCESS) {
+		dntree_log(0, "%s: mdb_cursor_get: %s (%d)",
+			__func__, mdb_strerror(rv), rv);
+		return rv;
+	};
+
 	/*
-	 * or simply use this instead of MDB_GET_BOTH + MDB_GET_CURRENT:
+	// or simply use this instead of MDB_GET_BOTH + MDB_GET_CURRENT:
 	MDB_txn		*txn;
 	MDB_dbi		dbi;
 	txn = mdb_cursor_txn(cur);
 	dbi = mdb_cursor_dbi(cur);
 	rv = mdb_get(txn, dbi, &key, &data);
-	*/
-	free(subdn);
-
-	// Workaround for (ITS#8393) LMDB - MDB_GET_BOTH broken on non-dup value
-	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_CURRENT);
-
 	if (rv != MDB_SUCCESS) {
-		dntree_log(0, "%s: mdb_cursor_get: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+		dntree_log(0,
+			"%s: mdb_get: %s (%d)",
+			__func__, mdb_strerror(rv), rv);
 		return rv;
 	};
+	*/
 
 	subdn = (subDN *) data.mv_data;
 
-	*dn = malloc(strlen(subdn->data));
-	strcpy(*dn, subdn->data);
+	*dn = strdup(subdn->data);
+	if (*dn == NULL) {
+		dntree_log(0, "%s: Strdup failed", __func__);
+		abort();
+	}
 
 	return rv;
 }
@@ -205,7 +223,7 @@ static int next_free_dnid(MDB_cursor *cur, DNID *dnid_out)
 		return MDB_SUCCESS;
 	} else {
 		dntree_log(0, "%s: failed: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+			__func__, mdb_strerror(rv), rv);
 		return rv;
 	}
 }
@@ -228,19 +246,20 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	rv = ldap_dn2str(dn, &dn_str, LDAP_DN_FORMAT_LDAPV3);
 	if (rv != LDAP_SUCCESS) {
 		dntree_log(0, "%s: ldap_dn2str failed: %s (%d)",
-		           __func__, ldap_err2string(rv), rv);
+			__func__, ldap_err2string(rv), rv);
 		return rv;
 	}
 
 	rv = ldap_rdn2str(dn[0], &rdn_str, LDAP_DN_FORMAT_LDAPV3);
 	if (rv != LDAP_SUCCESS) {
 		dntree_log(0, "%s: ldap_rdn2str failed: %s (%d)",
-		           __func__, ldap_err2string(rv), rv);
+			__func__, ldap_err2string(rv), rv);
+		ldap_memfree(dn_str);
 		return rv;
 	}
 
 	dntree_log(2, "%s: child=%lu, parent=%lu: \"%s\"",
-	           __func__, child, parent, rdn_str);
+		__func__, child, parent, rdn_str);
 
 	dn_len = strlen(dn_str);
 	subdn = malloc(sizeof(subDN) + dn_len);
@@ -249,6 +268,8 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	data.mv_size = sizeof(subDN) + rdn_len;
 	if (subdn == NULL) {
 		dntree_log(0, "%s: Malloc failed", __func__);
+		ldap_memfree(dn_str);
+		ldap_memfree(rdn_str);
 		abort();
 	}
 	subdn->type = SUBDN_TYPE_LINK;
@@ -271,9 +292,12 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 
 		rv = mdb_cursor_put(write_cursor_p, &key, &data, MDB_NODUPDATA);
 		if (rv != MDB_SUCCESS) {
-			dntree_log(0, "%s: failed for %lu: %s (%d)",
-			           __func__, child, mdb_strerror(rv), rv);
+			dntree_log(0, "%s: mdb_cursor_put failed for child %lu: %s (%d)",
+				__func__, id, mdb_strerror(rv), rv);
 		}
+	} else {
+		dntree_log(0, "%s: mdb_cursor_put failed for parent %lu: %s (%d)",
+			__func__, id, mdb_strerror(rv), rv);
 	}
 	ldap_memfree(dn_str);
 	free(subdn);
@@ -315,19 +339,19 @@ int dntree_del_id(MDB_cursor *write_cursor_p, DNID dnid)
 	rv = mdb_cursor_open(txn, dbi, &local_read_cursor_p);
 	if (rv != MDB_SUCCESS) {
 		dntree_log(0, "%s: mdb_cursor_open: %s (%d)",
-		           __func__, ldap_err2string(rv), rv);
+			__func__, ldap_err2string(rv), rv);
 		return rv;
 	}
 
 	rv = dntree_has_children(local_read_cursor_p, dnid);
 	if (rv == MDB_SUCCESS) {
 		dntree_log(0, "%s: delete failed:"
-		           " subordinate objects must be deleted first",
-		           __func__);
+			" subordinate objects must be deleted first",
+			__func__);
 		return -1;
 	} else if (rv != MDB_NOTFOUND) {
 		dntree_log(0, "%s: dntree_has_children failed: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+			__func__, mdb_strerror(rv), rv);
 		return -1;
 	}
 	mdb_cursor_close(local_read_cursor_p);
@@ -379,7 +403,7 @@ static int dntree_get_id4ldapdn(MDB_cursor *write_cursor_p, LDAPDN dn, DNID *dni
 			rv = dntree_get_id4ldapdn(write_cursor_p, pdn, &parent); 
 			if (rv != MDB_SUCCESS) {
 				dntree_log(0, "%s: failed: %s (%d)",
-				           __func__, mdb_strerror(rv), rv);
+					__func__, mdb_strerror(rv), rv);
 				return rv;
 			}
 		} else {
@@ -405,13 +429,13 @@ int dntree_get_id4dn(MDB_cursor *id2dn_cursor_p, char *dn, DNID *dnid, bool crea
 	rv = ldap_str2dn(dn, &ldapdn, LDAP_DN_FORMAT_LDAP);
 	if (rv != LDAP_SUCCESS) {
 		dntree_log(0, "%s: ldap_str2dn failed: %s (%d)",
-		           __func__, ldap_err2string(rv), rv);
+			__func__, ldap_err2string(rv), rv);
 		return rv;
 	}
 
 	if (ldapdn == NULL) {
 		dntree_log(0, "%s: ldap_str2dn NULL: %s (%d): %s",
-		           __func__, ldap_err2string(rv), rv, dn);
+			__func__, ldap_err2string(rv), rv, dn);
 		return 1;
 	}
 
@@ -419,13 +443,13 @@ int dntree_get_id4dn(MDB_cursor *id2dn_cursor_p, char *dn, DNID *dnid, bool crea
 		rv = dntree_get_id4ldapdn(id2dn_cursor_p, ldapdn, dnid); 
 		if (rv != MDB_SUCCESS) {
 			dntree_log(0, "%s: failed for: %s",
-			           __func__, dn);
+				__func__, dn);
 		}
 	} else {
 		rv = dntree_lookup_id4ldapdn(id2dn_cursor_p, ldapdn, dnid, NULL);
 		if (rv == MDB_NOTFOUND) {
 			dntree_log(0, "%s: DN %s not in id2dn",
-			           __func__, dn);
+				__func__, dn);
 		}
 	}
 
@@ -441,13 +465,13 @@ int dntree_del_dn(MDB_cursor *write_cursor_p, char *dn)
 	rv = ldap_str2dn(dn, &ldapdn, LDAP_DN_FORMAT_LDAP);
 	if (rv != LDAP_SUCCESS) {
 		dntree_log(0, "%s: ldap_str2dn failed: %s (%d)",
-		           __func__, ldap_err2string(rv), rv);
+			__func__, ldap_err2string(rv), rv);
 		return rv;
 	}
 
 	if (ldapdn == NULL) {
 		dntree_log(0, "%s: ldap_str2dn NULL: %s (%d): %s",
-		           __func__, ldap_err2string(rv), rv, dn);
+			__func__, ldap_err2string(rv), rv, dn);
 		return 1;
 	}
 
@@ -466,20 +490,20 @@ int dnid_init(mdb_ctx *mdb_ctx)
 	rv = mdb_open(mdb_ctx->txn, "id2dn", MDB_CREATE|MDB_INTEGERKEY|MDB_DUPSORT, &mdb_ctx->dbi);
 	if (rv != MDB_SUCCESS) {
 		dntree_log(0, "%s: failed: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+			__func__, mdb_strerror(rv), rv);
 		return rv;
 	};
 	rv = mdb_set_dupsort(mdb_ctx->txn, mdb_ctx->dbi, mdb_dupsort);
 	if (rv != MDB_SUCCESS) {
 		dntree_log(0, "%s: failed: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+			__func__, mdb_strerror(rv), rv);
 		return rv;
 	};
 
 	rv = mdb_cursor_open(mdb_ctx->txn, mdb_ctx->dbi, &mdb_ctx->cur);
 	if (rv != MDB_SUCCESS) {
 		dntree_log(0, "%s: failed: %s (%d)",
-		           __func__, mdb_strerror(rv), rv);
+			__func__, mdb_strerror(rv), rv);
 		return rv;
 	};
 
