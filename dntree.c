@@ -150,52 +150,89 @@ int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
 	MDB_val		key, data;
 	subDN		*subdn;
 	DNID		id = dnid;
+	LDAPDN		ldapdn = NULL;
+	char		*p;
+	int		i = 0;
 
-	key.mv_size = sizeof(DNID);
-	key.mv_data = &id;
+	do {
+		key.mv_size = sizeof(DNID);
+		key.mv_data = &id;
 
-	data.mv_size = sizeof(subDN);
-	data.mv_data = &(subDN){0, SUBDN_TYPE_NODE, ""};
+		data.mv_size = sizeof(subDN);
+		data.mv_data = &(subDN){0, SUBDN_TYPE_NODE, ""};
 
-	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_BOTH);
-	data.mv_data = NULL;
-	data.mv_size = 0;
+		rv = mdb_cursor_get(cur, &key, &data, MDB_GET_BOTH);
+		data.mv_data = NULL;
+		data.mv_size = 0;
 
-	if (rv != MDB_SUCCESS) {
-		dntree_log(0, "%s: mdb_cursor_get (MDB_GET_BOTH): %s (%d)",
-			__func__, mdb_strerror(rv), rv);
+		if (rv != MDB_SUCCESS) {
+			dntree_log(0, "%s: mdb_cursor_get (MDB_GET_BOTH): %s (%d)",
+				__func__, mdb_strerror(rv), rv);
+			return rv;
+		};
+
+		// Workaround for (ITS#8393) LMDB - MDB_GET_BOTH broken on non-dup value
+		rv = mdb_cursor_get(cur, &key, &data, MDB_GET_CURRENT);
+		if (rv != MDB_SUCCESS) {
+			dntree_log(0, "%s: mdb_cursor_get: %s (%d)",
+				__func__, mdb_strerror(rv), rv);
+			return rv;
+		};
+
+		/*
+		// or simply use this instead of MDB_GET_BOTH + MDB_GET_CURRENT:
+		MDB_txn		*txn;
+		MDB_dbi		dbi;
+		txn = mdb_cursor_txn(cur);
+		dbi = mdb_cursor_dbi(cur);
+		rv = mdb_get(txn, dbi, &key, &data);
+		if (rv != MDB_SUCCESS) {
+			dntree_log(0,
+				"%s: mdb_get: %s (%d)",
+				__func__, mdb_strerror(rv), rv);
+			return rv;
+		};
+		*/
+
+		if (!ldapdn) {
+			i = 0;
+			ldapdn = calloc(2, sizeof(LDAPDN));
+		} else {
+			i++;
+			ldapdn = realloc(ldapdn, (i+2)*sizeof(LDAPDN));
+		}
+		if (ldapdn == NULL) {
+			dntree_log(0, "%s: %s failed",
+				__func__, i?"realloc":"calloc");
+			abort();
+		}
+		if (i != 0) {
+			ldapdn[i+1] = NULL;
+		}
+
+		subdn = (subDN *)data.mv_data;
+		rv = ldap_str2rdn(subdn->data, &ldapdn[i], &p, LDAP_DN_FORMAT_LDAP);
+		if (rv != LDAP_SUCCESS) {
+			dntree_log(0, "%s: ldap_str2rdn failed: %s (%d)",
+				__func__, ldap_err2string(rv), rv);
+			return rv;
+		}
+
+		if (ldapdn[i] == NULL) {
+			dntree_log(0, "%s: ldap_str2rdn NULL: %s (%d): %s",
+				__func__, ldap_err2string(rv), rv, subdn->data);
+			return 1;
+		}
+
+		id = subdn->id;
+	} while (id != 0);
+
+	rv = ldap_dn2str(ldapdn, dn, LDAP_DN_FORMAT_LDAPV3);
+	ldap_dnfree(ldapdn);
+	if (rv != LDAP_SUCCESS) {
+		dntree_log(0, "%s: ldap_dn2str failed: %s (%d)",
+			__func__, ldap_err2string(rv), rv);
 		return rv;
-	};
-
-	// Workaround for (ITS#8393) LMDB - MDB_GET_BOTH broken on non-dup value
-	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_CURRENT);
-	if (rv != MDB_SUCCESS) {
-		dntree_log(0, "%s: mdb_cursor_get: %s (%d)",
-			__func__, mdb_strerror(rv), rv);
-		return rv;
-	};
-
-	/*
-	// or simply use this instead of MDB_GET_BOTH + MDB_GET_CURRENT:
-	MDB_txn		*txn;
-	MDB_dbi		dbi;
-	txn = mdb_cursor_txn(cur);
-	dbi = mdb_cursor_dbi(cur);
-	rv = mdb_get(txn, dbi, &key, &data);
-	if (rv != MDB_SUCCESS) {
-		dntree_log(0,
-			"%s: mdb_get: %s (%d)",
-			__func__, mdb_strerror(rv), rv);
-		return rv;
-	};
-	*/
-
-	subdn = (subDN *) data.mv_data;
-
-	*dn = strdup(subdn->data);
-	if (*dn == NULL) {
-		dntree_log(0, "%s: strdup failed", __func__);
-		abort();
 	}
 
 	return rv;
@@ -227,7 +264,6 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	DNID		id;
 	char		*rdn_str;
 	char		*dn_str;
-	size_t		dn_len;
 	size_t		rdn_len;
 	subDN		*subdn;
 
@@ -253,21 +289,18 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	dntree_log(2, "%s: child=%lu, parent=%lu: \"%s\"",
 		__func__, child, parent, rdn_str);
 
-	dn_len = strlen(dn_str);
-	subdn = calloc(1, sizeof(subDN) + dn_len);
+	rdn_len = strlen(rdn_str);
+	subdn = calloc(1, sizeof(subDN) + rdn_len);
 	if (subdn == NULL) {
 		dntree_log(0, "%s: calloc failed", __func__);
 		ldap_memfree(dn_str);
 		ldap_memfree(rdn_str);
 		abort();
 	}
-	rdn_len = strlen(rdn_str);
-	assert(dn_len >= rdn_len);
 	data.mv_size = sizeof(subDN) + rdn_len;
 	subdn->type = SUBDN_TYPE_LINK;
 	subdn->id = child;
 	strcpy(subdn->data, rdn_str);
-	ldap_memfree(rdn_str);
 	data.mv_data = subdn;
 
 	// Store subdn link
@@ -277,10 +310,10 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 	if (rv == MDB_SUCCESS) {
 		id = child;
 
-		data.mv_size = sizeof(subDN) + dn_len;
+		data.mv_size = sizeof(subDN) + rdn_len;
 		subdn->type = SUBDN_TYPE_NODE;
 		subdn->id = parent;	// backlink
-		strcpy(subdn->data, dn_str);
+		strcpy(subdn->data, rdn_str);
 
 		rv = mdb_cursor_put(write_cursor_p, &key, &data, MDB_NODUPDATA);
 		if (rv != MDB_SUCCESS) {
@@ -291,6 +324,7 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 		dntree_log(0, "%s: mdb_cursor_put failed for parent %lu: %s (%d)",
 			__func__, id, mdb_strerror(rv), rv);
 	}
+	ldap_memfree(rdn_str);
 	ldap_memfree(dn_str);
 	free(subdn);
 
