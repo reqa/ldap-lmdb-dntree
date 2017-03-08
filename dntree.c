@@ -1,8 +1,8 @@
 /*
- *  example implementation for mdb dntree adjecency list
+ *  example implementation for LMDB dntree adjecency list
  *
- * Copyright 2016 Univention GmbH
- * Copyright 2016 Arvid Requate
+ * Copyright 2016-2017 Univention GmbH
+ * Copyright 2016-2017 Arvid Requate
  *
  * http://www.univention.de/
  *
@@ -41,7 +41,6 @@
 
 #include <stdio.h>
 #include <unistd.h>
-#include <malloc.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -49,7 +48,7 @@
 #include <assert.h>
 #include "dntree.h"
 
-int mdb_dupsort(const MDB_val *a, const MDB_val *b)
+static int mdb_dupsort(const MDB_val *a, const MDB_val *b)
 {
 	int		diff;
 	subDN		*sdn_a, *sdn_b;
@@ -101,9 +100,9 @@ static int dntree_lookup_id4ldapdn(MDB_cursor *cur, LDAPDN dn, DNID *dnid_out, i
 		parent = id;
 
 		data.mv_size = sizeof(subDN) + strlen(rdn);
-		subdn = malloc(data.mv_size);
+		subdn = calloc(1, data.mv_size);
 		if (subdn == NULL) {
-			dntree_log(0, "%s: Malloc failed", __func__);
+			dntree_log(0, "%s: calloc failed", __func__);
 			ldap_memfree(rdn);
 			abort();
 		}
@@ -156,16 +155,9 @@ int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
 	key.mv_data = &id;
 
 	data.mv_size = sizeof(subDN);
-	subdn = malloc(data.mv_size);
-	if (subdn == NULL) {
-		dntree_log(0, "%s: Malloc failed", __func__);
-		abort();
-	}
-	subdn->type = SUBDN_TYPE_NODE;
-	data.mv_data = subdn;
+	data.mv_data = &(subDN){0, SUBDN_TYPE_NODE, ""};
 
 	rv = mdb_cursor_get(cur, &key, &data, MDB_GET_BOTH);
-	free(subdn);
 	data.mv_data = NULL;
 	data.mv_size = 0;
 
@@ -202,7 +194,7 @@ int dntree_lookup_dn4id(MDB_cursor *cur, DNID dnid, char **dn)
 
 	*dn = strdup(subdn->data);
 	if (*dn == NULL) {
-		dntree_log(0, "%s: Strdup failed", __func__);
+		dntree_log(0, "%s: strdup failed", __func__);
 		abort();
 	}
 
@@ -262,16 +254,16 @@ static int dntree_add_id(MDB_cursor *write_cursor_p, DNID child, LDAPDN dn, DNID
 		__func__, child, parent, rdn_str);
 
 	dn_len = strlen(dn_str);
-	subdn = malloc(sizeof(subDN) + dn_len);
-	rdn_len = strlen(rdn_str);
-	assert(dn_len >= rdn_len);
-	data.mv_size = sizeof(subDN) + rdn_len;
+	subdn = calloc(1, sizeof(subDN) + dn_len);
 	if (subdn == NULL) {
-		dntree_log(0, "%s: Malloc failed", __func__);
+		dntree_log(0, "%s: calloc failed", __func__);
 		ldap_memfree(dn_str);
 		ldap_memfree(rdn_str);
 		abort();
 	}
+	rdn_len = strlen(rdn_str);
+	assert(dn_len >= rdn_len);
+	data.mv_size = sizeof(subDN) + rdn_len;
 	subdn->type = SUBDN_TYPE_LINK;
 	subdn->id = child;
 	strcpy(subdn->data, rdn_str);
