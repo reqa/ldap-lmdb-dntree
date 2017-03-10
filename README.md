@@ -30,8 +30,8 @@ Currently this code is maintained by the author, feedback is welcome.
 
 ## License
 
-Copyright 2016 Univention GmbH  
-Copyright 2016 Arvid Requate
+Copyright 2016-2017 Univention GmbH  
+Copyright 2016-2017 Arvid Requate
 
 The source code of this program is made available
 under the terms of the GNU Affero General Public License version 3

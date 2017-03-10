@@ -1,8 +1,8 @@
 /*
  *  example usage for dntree
  *
- * Copyright 2016 Univention GmbH
- * Copyright 2016 Arvid Requate
+ * Copyright 2016-2017 Univention GmbH
+ * Copyright 2016-2017 Arvid Requate
  *
  * http://www.univention.de/
  *
