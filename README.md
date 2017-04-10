@@ -34,8 +34,7 @@ Copyright 2016-2017 Univention GmbH
 Copyright 2016-2017 Arvid Requate
 
 The source code of this program is made available
-under the terms of the GNU Affero General Public License version 3
-(GNU AGPL V3) as published by the Free Software Foundation.
+under the terms of the [OpenLDAP](http://www.openldap.org/) Public License.
 
 This code is derived from dn2id.c written by Howard Chu.
 The code of dn2id.c has been published under [OpenLDAP](http://www.openldap.org/) Public License.  
